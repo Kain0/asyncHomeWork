@@ -3,6 +3,7 @@
 #include <vector>
 #include <ctime>
 #include <future>
+#include <omp.h>
 
 //Попов Андрей
 //БПИ197
@@ -49,8 +50,8 @@ int get_int(std::string message, int min_value = INT32_MIN, int max_value = INT3
 /// <param name="min_value">левая граница</param>
 /// <param name="max_value">правая граница</param>
 /// <returns>Возвращает случайное целое число включая обе границы</returns>
-int next_int(int min_value, int max_value) {
-	return min_value + (rand() % (max_value - min_value + 1));
+int next_int(int min_value, int max_value, int my_seed = 0) {
+	return min_value + ((rand()+my_seed) % (max_value - min_value + 1));
 }
 
 /// <summary>
@@ -59,97 +60,105 @@ int next_int(int min_value, int max_value) {
 /// <param name="min_length">минимальная длина</param>
 /// <param name="max_length">максимальная длина</param>
 /// <returns>случайное название книги</returns>
-std::string get_random_title(int min_length = 3, int max_length = 30) {
+std::string get_random_title(int min_length = 3, int max_length = 30, int my_seed = 0) {
 	std::string str;
-	str += (char)next_int('A', 'Z');
-	for (int i = 0; i < next_int(min_length, max_length) - 1; i++) {
-		if (next_int(1, 1000) < 175) //обусловлено приблизительной частотой пробела в текстах на английском языке
+	str += (char)next_int('A', 'Z', my_seed);
+	for (int i = 0; i < next_int(min_length, max_length, my_seed) - 1; i++) {
+		if (next_int(1, 1000, my_seed) < 175) //обусловлено приблизительной частотой пробела в текстах на английском языке
 			str += " ";
 		else
-			str += (char)next_int('a', 'z');
+			str += (char)next_int('a', 'z', my_seed);
 	}
 	return str;
 
 }
 
+
 /// <summary>
 /// Создаёт ряд в каталоге
 /// </summary>
-/// <param name="rows">каталог</param>
-/// <param name="row">конкретный ряд этого каталога</param>
+/// <param name="library">каталог</param>
+/// <param name="library_row">конкретный ряд этого каталога</param>
 /// <param name="M"></param>
 /// <param name="N"></param>
 /// <param name="K"></param>
-void make_row(std::string*** rows, int row, int M, int N, int K) {
+void make_row(std::string** library_row, int* catalog_row, int N, int K, int student_number, int row_number) {
+	std::vector<std::string> prototype_library_row;
+	std::vector<int> prototype_catalog_row;
 	for (int j = 0; j < N; j++) {
-		for (int k = 0; k < K; k++)
-			rows[row][j][k] = get_random_title();
+		for (int k = 0; k < K; k++) {
+#pragma omp critical (searching)
+			{
+				library_row[j][k] = get_random_title(0, 30, row_number);
+				std::cout << "student " << student_number << " has found "
+					<< '|' << library_row[j][k] << "| at the position " << '[' << row_number << "][" << j << "][" << k << "] \n";
+			}
+			prototype_library_row.push_back(library_row[j][k]);
+			prototype_catalog_row.push_back(j * K + k);
+		}
+	}
+	std::sort(prototype_catalog_row.begin(), prototype_catalog_row.end(),
+		[prototype_library_row](int a, int b) {return prototype_library_row[a] < prototype_library_row[b]; });
+	for (int j = 0; j < K * N; j++)
+		catalog_row[j] = prototype_catalog_row[j];
+}
+
+/// <summary>
+/// Составляет каталог в нескольких потоках
+/// </summary>
+/// <param name="library">библиотека</param>
+/// <param name="catalog">каталог
+/// <param name="M"></param>
+/// <param name="N"></param>
+/// <param name="K"></param>
+/// <returns></returns>
+void student_thread(std::string*** library, int** catalog, int M, int N, int K) {
+	srand(time(NULL));
+#pragma omp parallel for 
+	for (int i = 0; i < M; i++) { //реализация "портфеля зада" - поиск рядов, к которым ещё никто не приступал и заполнение этих рядов.
+		int student_number = omp_get_thread_num();
+		//std::cout << "student " << student_number << " started working with row " << i << '\n'; //для проверок, что потоки работают как надо
+		make_row(library[i], catalog[i], N, K, omp_get_thread_num(), i);
+		//std::cout << "student " << student_number << " finished working with row " << i << '\n';
+
+
 	}
 }
 
 /// <summary>
-/// Символизирует работу студента, заполняющего последовательно ряды, если к ним ещё никто не приступал
+/// Выписывает все книги каталога 
 /// </summary>
-/// <param name="rows">каталаг</param>
-/// <param name="started">массив булов, определящий, начал ли кто-то работу на каким-либо рядом</param>
+/// <param name="library">библиотека</param>
+/// <param name="catalog">каталог</param>
 /// <param name="M"></param>
 /// <param name="N"></param>
 /// <param name="K"></param>
-/// <param name="student_number">уникальный номер студента</param>
-/// <returns></returns>
-int student_thread(std::string*** rows, bool* started, int M, int N, int K, int student_number) {
-	srand(time(NULL));
-	for (int i = 0; i < M; i++) //реализация "портфеля зада" - поиск рядов, к которым ещё никто не приступал и заполнение этих рядов.
-		if (!started[i]) {
-			started[i] = true;
-			//std::cout << "student " << student_number << " fills in the row " << i << '\n'; //для проверок, что потоки работают как надо
-			make_row(rows, i, M, N, K);
-			//std::cout << "student " << student_number << " finished filling the row " << i << '\n';
-
-		}
-	return 0;
-}
-
-/// <summary>
-/// Выписывает все книги каталога
-/// </summary>
-/// <param name="rows">каталог</param>
-/// <param name="M"></param>
-/// <param name="N"></param>
-/// <param name="K"></param>
-void write_answer(std::string*** rows, int M, int N, int K) {
+void write_answer(std::string*** library, int** catalog, int M, int N, int K) {
 	std::cout << "CATALOG:\n";
 	for (int i = 0; i < M; i++) {
 		std::cout << "row " << i << ":\n";
-		for (int j = 0; j < N; j++) {
-			std::cout << "    bookcase " << j << ":\n";
-			for (int k = 0; k < K; k++)
-				std::cout << "        [" << i << "][" << j << "][" << k << "]: " << rows[i][j][k] << '\n';
+		for (int j = 0; j < N * K; j++) {
+			int n = catalog[i][j] / K;
+			int k = catalog[i][j] % K;
+			std::cout << '|' << library[i][n][k] << "| at the position " << '[' << i << "][" << n << "][" << k << "] \n";
 		}
 	}
 
 }
-
 
 int main() {
 	int M = get_int("Enter the number of rows(M)(Not less than 1, not more then 100): ", 1, 100); // ввод входных данных
 	int N = get_int("Enter the number of bookcases(N)(Not less than 1, not more than 100): ", 1, 100);
 	int K = get_int("Enter the number of books(K)(Not less than 1, not more than 100): ", 1, 100);
-	int students_count = get_int("Enter the number of students(not less that 1 not more then M): ", 1, M);
-	std::string*** rows = new std::string * *[M]; //генерация каталога
+	int** catalog = new int* [M];
+	std::string*** library = new std::string * *[M]; //генерация библитеки
 	for (int i = 0; i < M; i++) {
-		rows[i] = new std::string * [N];
-		for (int j = 0; j < N; j++) {
-			rows[i][j] = new std::string[K];
-		}
+		catalog[i] = new int[N * K];
+		library[i] = new std::string * [N];
+		for (int j = 0; j < N; j++)
+			library[i][j] = new std::string[K];
 	}
-	bool* started = new bool[M];
-	for (int i = 0; i < M; i++)
-		started[i] = false;
-	std::vector<std::future<int>> students; //вектор потоков
-	for (int i = 0; i < students_count; i++)
-		students.push_back(async(student_thread, rows, started, M, N, K, i)); //запуск вектора потоков
-	for (std::future<int>& student : students) //ожидание пока потоки не завершат работу
-		student.get();
-	write_answer(rows, M, N, K); //вывод ответа на задачу
+	student_thread(library, catalog, M, N, K);
+	write_answer(library, catalog, M, N, K); //вывод ответа на задачу
 }
+
