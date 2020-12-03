@@ -89,7 +89,7 @@ void make_row(std::string** library_row, int* catalog_row, int N, int K, int stu
 		for (int k = 0; k < K; k++) {
 #pragma omp critical (searching)
 			{
-				library_row[j][k] = get_random_title(0, 30, row_number);
+				library_row[j][k] = get_random_title(3, 30, row_number);
 				std::cout << "student " << student_number << " has found "
 					<< '|' << library_row[j][k] << "| at the position " << '[' << row_number << "][" << j << "][" << k << "] \n";
 			}
